@@ -43,7 +43,7 @@
 
 float getConcentration(unsigned long lowDuration_ms, unsigned long sampleTime_ms)
 {
-	float ratio = lowDuration_ms / (sampleTime_ms * 10.0f);
+	float ratio = (float)(lowDuration_ms) / (float)(sampleTime_ms);
 	transmitString("ratio is ");
 	transmitFloat(ratio);
 	transmitChar('\r');
@@ -69,6 +69,10 @@ int main (void)
 	{
 		if (IsDataReady())
 		{
+			transmitString("Done Pulse\r\n");
+			unsigned long test = GetLevelDurationMs();
+			transmitLongAsDec(test);
+			transmitString("\r\n");
 			lowDuration_ms += GetLevelDurationMs();
 			transmitChar('\r');
 			transmitChar('\n');
@@ -78,7 +82,9 @@ int main (void)
 
 			if (GetTimeStampMs() > endTime)
 			{
-				transmitString("Done\r\n");
+				transmitString("Done All, final location ms is ");
+				transmitLongAsDec(lowDuration_ms);
+				transmitString("\r\n");
 				transmitFloat(getConcentration(lowDuration_ms, 30000));
 				transmitString("\r\n");
 				lowDuration_ms = 0;
