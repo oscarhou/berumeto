@@ -7,15 +7,14 @@
 
 typedef struct SampleData_t
 {
-	unsigned long sampleEnd_tick;
 	unsigned long currStart_tick;
+	unsigned long sampleEnd_tick;
 	unsigned long levelDuration_tick;
 	unsigned long levelDuration_fraction;
 	int lastLevel;
 	int watchLevel;
 	bool bReady;
-	unsigned long fallCount;
-	unsigned long riseCount;
+	bool bStart;
 } SampleData;
 
 static volatile unsigned long numTimerOverflow = 0;
@@ -27,79 +26,75 @@ static volatile int secondReady = 0;
 static volatile int update = 0;
 
 static const uint16_t kMax16Bit = 65535;
-static volatile unsigned long numEntry = 0;
+static inline void UpdateSample()
+{
+	uint16_t tempFraction = (ICR1H << 8) + ICR1L;
+	uint32_t tempAdd = tempFraction + sample.levelDuration_fraction;
+	sample.levelDuration_tick += numTimerOverflow - sample.currStart_tick;
+	if (tempAdd >= kMax16Bit)
+	{
+		sample.levelDuration_fraction = tempAdd - kMax16Bit;
+		numTimerOverflow++;
+	}
+	else
+	{
+		sample.levelDuration_fraction = tempAdd;
+	}
+}
+
 ISR(TIMER1_CAPT_vect) {
-//	if (sample.bReady)
-//		return;
-//
-
-	numEntry++;
-	return;
-	update = 1;
-	// Rising Edge when ICES1 is 1
-	if (TCCR1B & (1 << ICES1))
+	if (!sample.bReady)
 	{
-		// Update watch level
-		if (sample.watchLevel == 0)
+		// Rising Edge when ICES1 is 1
+		if (TCCR1B & (1 << ICES1))
 		{
-			uint16_t tempFraction = (ICR1H << 8) + ICR1L;
-			uint32_t tempAdd = tempFraction + sample.levelDuration_fraction;
-			sample.levelDuration_tick += numTimerOverflow - sample.currStart_tick;
-			if (tempAdd >= kMax16Bit)
+			if (!sample.bStart && sample.watchLevel == 1)
 			{
-				sample.levelDuration_fraction = tempAdd - kMax16Bit;;
-				numTimerOverflow++;
+				sample.bStart = true;
+				sample.currStart_tick = numTimerOverflow;
 			}
-			else
+			else if (sample.bStart && sample.watchLevel == 0)
 			{
-				sample.levelDuration_fraction = tempAdd;
+				sample.levelDuration_tick = numTimerOverflow - sample.currStart_tick;
+				sample.bReady = true;
 			}
-		}
-		sample.riseCount++;
 
-		sample.lastLevel = 1;
-		TCCR1B = (TCCR1B & ~(1 << ICES1));
-	}
-	else // Falling Edge when ICES1 is 0
-	{
-		if (sample.watchLevel == 1)
+			TCCR1B = (TCCR1B & ~(1 << ICES1));
+		}
+		else // Falling Edge when ICES1 is 0
 		{
-			uint16_t tempFraction = (ICR1H << 8) + ICR1L;
-			uint32_t tempAdd = tempFraction + sample.levelDuration_fraction;
-			sample.levelDuration_tick += numTimerOverflow - sample.currStart_tick;
-			if (tempAdd >= kMax16Bit)
+			if (sample.bStart && sample.watchLevel == 1)
 			{
-				sample.levelDuration_fraction = tempAdd - kMax16Bit;
-				numTimerOverflow++;
+				sample.levelDuration_tick = numTimerOverflow - sample.currStart_tick;
+				sample.bReady = true;
 			}
-			else
+			else if (!sample.bStart && sample.watchLevel == 0)
 			{
-				sample.levelDuration_fraction = tempAdd;
+				sample.bStart = true;
+				sample.currStart_tick = numTimerOverflow;
 			}
+			
+			TCCR1B = (TCCR1B | (1 << ICES1));
 		}
-
-		sample.lastLevel = 0;
-		sample.fallCount++;
-		TCCR1B = (TCCR1B | (1 << ICES1));
 	}
-	sample.currStart_tick = numTimerOverflow;
 }
 
 ISR(TIMER1_OVF_vect)
 {
 	if (numTimerOverflow >= sample.sampleEnd_tick)
 	{
-		if (sample.lastLevel == sample.watchLevel)
-		{
-			sample.levelDuration_tick += numTimerOverflow - sample.currStart_tick;
-		}
+		if (sample.bStart)
+			sample.levelDuration_tick = numTimerOverflow - sample.currStart_tick;
+
 		sample.bReady = true;
 	}
 
-	if (numTimerOverflow >= secondEnd_ticks)
-		secondReady = 1;
-
 	numTimerOverflow++;
+}
+
+unsigned long GetWatchLevelTime()
+{
+	return sample.levelDuration_tick;
 }
 
 int HasSecondPassed()
@@ -121,31 +116,25 @@ void InitializeTimer()
 	TCCR1B |= 1 << (CS10);
 }
 
-unsigned long GetCycleStamp()
+unsigned long GetTimeStampMs()
 {
-	return numTimerOverflow;
+	return numTimerOverflow * OVERFLOW_TO_MILLI;
 }
 
 void StartLevelTimer(int watchLevel, unsigned long duration_ms)
 {
 	sample.bReady = false;
+	sample.bStart = false;
 	sample.watchLevel = watchLevel;
 	sample.levelDuration_tick = 0;
 	sample.currStart_tick = numTimerOverflow;
 	// FIXME: Better check that overflow boi
 	sample.sampleEnd_tick = numTimerOverflow + (duration_ms / OVERFLOW_TO_MILLI);
-	sample.fallCount = 0;
-	sample.riseCount = 0;
 }
 
 int IsDataReady()
 {
 	return sample.bReady;
-}
-
-unsigned long GetLevelDurationCurrent()
-{
-	return sample.levelDuration_tick;
 }
 
 unsigned long GetLevelDurationMs()
@@ -162,19 +151,13 @@ void TransmitState()
 {
 	transmitString("Info:");
 	transmitChar('-');
-	transmitLongAsDec(sample.levelDuration_tick);
+	transmitLongAsDec(sample.levelDuration_tick * OVERFLOW_TO_MILLI);
 	transmitChar('-');
-	transmitLongAsDec(numTimerOverflow);
+	transmitLongAsDec(numTimerOverflow * OVERFLOW_TO_MILLI);
 	transmitChar('-');
-	transmitLongAsDec(sample.currStart_tick);
+	transmitLongAsDec(sample.currStart_tick * OVERFLOW_TO_MILLI);
 	transmitChar('-');
-	transmitLongAsDec(sample.sampleEnd_tick);
-	transmitChar('-');
-	transmitLongAsDec(sample.fallCount);
-	transmitChar('-');
-	transmitLongAsDec(sample.riseCount);
-	transmitChar('-');
-	transmitLongAsDec(numEntry);
+	transmitLongAsDec(sample.sampleEnd_tick * OVERFLOW_TO_MILLI);
 	transmitChar('-');
 
 }

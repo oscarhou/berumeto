@@ -58,38 +58,35 @@ int main (void)
 	SPI_MasterInit();
 	InitializeTimer();
 	DDRD = DDRD & !(1 << PD7);
-	transmitString("Particle Sensor");
-	transmitChar('\r');
-	transmitChar('\n');
+	transmitString("Particle Sensor\r\n");
 	StartLevelTimer(0, 30000);
 	// Turn interrupts on.
+	//
+	unsigned long lowDuration_ms = 0;
+	unsigned long endTime = GetTimeStampMs() + 30000;
 	sei();
 	while(1)
 	{
-		if (HasSecondPassed())
-		{
-			TransmitState();
-			transmitLongAsDec(GetLevelDurationCurrent());
-			transmitChar('-');
-			if ((PINB & (1 << PINB0)))
-				transmitString("HIGH");
-			else
-				transmitString("LOW");
-
-			transmitChar('\r');
-			transmitChar('\n');
-		
-		}
-
 		if (IsDataReady())
 		{
-			transmitFloat(getConcentration(GetLevelDurationMs(), 30000));
+			lowDuration_ms += GetLevelDurationMs();
 			transmitChar('\r');
 			transmitChar('\n');
 			TransmitState();
 			transmitChar('\r');
 			transmitChar('\n');
+
+			if (GetTimeStampMs() > endTime)
+			{
+				transmitString("Done\r\n");
+				transmitFloat(getConcentration(lowDuration_ms, 30000));
+				transmitString("\r\n");
+				lowDuration_ms = 0;
+				endTime = GetTimeStampMs() + 30000;
+			}
+
 			StartLevelTimer(0, 30000);
 		}
+
 	}
 }
