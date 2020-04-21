@@ -61,7 +61,6 @@ int main (void)
 	transmitString("Particle Sensor\r\n");
 	StartLevelTimer(0, 30000);
 	// Turn interrupts on.
-	//
 	unsigned long lowDuration_ms = 0;
 	unsigned long endTime = GetTimeStampMs() + 30000;
 	sei();
